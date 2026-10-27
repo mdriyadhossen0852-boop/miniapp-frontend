@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Videos</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body{margin:0;font-family:sans-serif;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#111)}
+  header{padding:12px;position:sticky;top:0;background:var(--tg-theme-bg-color,#fff)}
+  input{width:100%;padding:10px;border-radius:10px;border:1px solid #ccc;box-sizing:border-box}
+  .tabs{display:flex;gap:8px;overflow-x:auto;padding:8px 12px}
+  .tab{padding:8px 16px;border-radius:20px;background:#eee;color:#111;white-space:nowrap;cursor:pointer}
+  .tab.on{background:#ff5a2c;color:#fff}
+  .card{margin:12px;border-radius:14px;overflow:hidden;background:rgba(128,128,128,.12);cursor:pointer}
+  .card img{width:100%;display:block}
+  .card h3{margin:10px 12px;font-size:16px}
+  .btns{display:flex;gap:8px;margin:12px}
+  button{flex:1;padding:12px;border:0;border-radius:12px;font-size:15px;cursor:pointer}
+  .dl{background:#111;color:#fff}
+  .cmt{margin:8px 12px;font-size:14px}
+  .hide{display:none}
+</style>
+</head>
+<body>
+
+<div id="home">
+  <header><input id="search" placeholder="Search..."></header>
+  <div class="tabs" id="tabs"></div>
+  <div id="list"></div>
+</div>
+
+<div id="detail" class="hide"></div>
+
+<script>
+const tg = Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+const API = "https://miniapp-backend-cce4.onrender.com";
+const CATEGORIES = ["All", "Tutorial", "Movie", "Music"];
+let category = "All";
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    ...opts,
+    headers: {"X-Init-Data": tg.initData, "Content-Type": "application/json"},
+  });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+function el(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  kids.forEach(k => e.append(k));
+  return e;
+}
+
+function renderTabs() {
+  const box = document.getElementById("tabs");
+  box.replaceChildren(...CATEGORIES.map(c =>
+    el("div", {
+      className: "tab" + (c === category ? " on" : ""),
+      textContent: c,
+      onclick: () => { category = c; renderTabs(); loadList(); },
+    })));
+}
+
+async function loadList() {
+  const q = document.getElementById("search").value;
+  const videos = await api(`/videos?category=${encodeURIComponent(category)}&q=${encodeURIComponent(q)}`);
+  document.getElementById("list").replaceChildren(...videos.map(v =>
+    el("div", {className: "card", onclick: () => openVideo(v.id)},
+      el("img", {src: v.thumb}),
+      el("h3", {textContent: v.title}))));
+}
+
+async function showAd() {
+  // Replace with your ad network later (for example Adsgram)
+  return new Promise(res => setTimeout(res, 3000));
+}
+
+async function openVideo(id) {
+  const v = await api(`/videos/${id}`);
+  const home = document.getElementById("home");
+  const box = document.getElementById("detail");
+  home.classList.add("hide");
+  box.classList.remove("hide");
+  tg.BackButton.show();
+  tg.BackButton.onClick(() => {
+    box.classList.add("hide");
+    home.classList.remove("hide");
+    tg.BackButton.hide();
+  });
+
+  const likeBtn = el("button", {textContent: (v.liked ? "❤️ " : "🤍 ") + v.likes});
+  likeBtn.onclick = async () => {
+    const r = await api(`/videos/${id}/like`, {method: "POST"});
+    likeBtn.textContent = (r.liked ? "❤️ " : "🤍 ") + r.likes;
+  };
+
+  const dlBtn = el("button", {className: "dl", textContent: "Download"});
+  dlBtn.onclick = async () => {
+    dlBtn.textContent = "Please wait...";
+    await showAd();
+    const r = await api(`/videos/${id}/download`, {method: "POST"});
+    dlBtn.textContent = "Download";
+    tg.openLink(r.url);
+  };
+
+  const input = el("input", {placeholder: "Add a public comment..."});
+  const send = el("button", {textContent: "Send"});
+  send.onclick = async () => {
+    if (!input.value.trim()) return;
+    await api(`/videos/${id}/comment`, {method: "POST", body: JSON.stringify({text: input.value})});
+    openVideo(id);
+  };
+
+  box.replaceChildren(
+    el("img", {src: v.thumb, style: "width:100%"}),
+    el("h2", {textContent: v.title, style: "margin:12px"}),
+    el("div", {className: "btns"}, likeBtn, dlBtn),
+    el("div", {style: "margin:12px"}, input, send),
+    ...v.comments.map(c =>
+      el("div", {className: "cmt", textContent: c.user_name + ": " + c.text}))
+  );
+}
+
+document.getElementById("search").addEventListener("input", loadList);
+renderTabs();
+loadList();
+</script>
+</body>
+</html>
